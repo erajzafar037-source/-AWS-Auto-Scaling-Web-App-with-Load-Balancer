@@ -1,0 +1,2 @@
+# -AWS-Auto-Scaling-Web-App-with-Load-Balancer
+Simple web application on AWS (highly available &amp; auto-scales).Infrastructure should include a VPC, subnets, an Application Load Balancer (ALB), &amp; an Auto Scaling Group (ASG) of EC2 instances running the app. Use Terraform for Implement rolling deployments so that new versions are rolled out with zero downtime. Add CloudWatch metrics &amp; dashboards. 
