@@ -1,0 +1,10 @@
+.terraform/
+*.tfstate*
+*.tfvars
+!terraform.tfvars.example
+.terraform.lock.hcl.bak
+__pycache__/
+.pytest_cache/
+*.pyc
+packer/build.log
+node_modules/
