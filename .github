@@ -1,2 +1,80 @@
-work flow 
-Ci file 
+make a work flow floder
+make a Ci file floder containing below are the file context
+name: ci-cd
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write   # OIDC to AWS: no long-lived keys in GitHub
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  TF_DIR: terraform
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r app/requirements.txt
+      - run: cd app && pytest -q
+
+  terraform-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform -chdir=$TF_DIR fmt -check -recursive
+      - run: terraform -chdir=$TF_DIR init -backend=false
+      - run: terraform -chdir=$TF_DIR validate
+
+  build-ami:
+    if: github.ref == 'refs/heads/main'
+    needs: [test, terraform-validate]
+    runs-on: ubuntu-latest
+    outputs:
+      ami_id: ${{ steps.ami.outputs.ami_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-packer@main
+      - run: |
+          cd packer
+          packer init .
+          packer build -var "app_version=${GITHUB_SHA::7}" -machine-readable . | tee build.log
+      - id: ami
+        run: echo "ami_id=$(grep 'artifact,0,id' packer/build.log | cut -d, -f6 | cut -d: -f2)" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: build-ami
+    runs-on: ubuntu-latest
+    environment: production   # add required reviewers for a manual approval gate
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform -chdir=$TF_DIR init
+      - name: Apply (new launch template version -> rolling instance refresh)
+        run: |
+          terraform -chdir=$TF_DIR apply -auto-approve \
+            -var "ami_id=${{ needs.build-ami.outputs.ami_id }}" \
+            -var "app_version=${GITHUB_SHA::7}"
+      - name: Wait for instance refresh and run integration test
+        run: |
+          ASG=$(terraform -chdir=$TF_DIR output -raw asg_name)
+          ./scripts/wait_for_refresh.sh "$ASG"
+          APP_URL=$(terraform -chdir=$TF_DIR output -raw app_url) \
+          EXPECT_VERSION=${GITHUB_SHA::7} \
+          pip install httpx pytest && pytest -q tests/
