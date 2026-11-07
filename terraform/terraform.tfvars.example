@@ -1,0 +1,6 @@
+region      = "us-east-1"
+name        = "webapp"
+ami_id      = "" # set to Packer AMI id for golden-AMI deploys
+app_version = "1.0.0"
+domain_name = "" # e.g. app.example.com
+alarm_email = ""
